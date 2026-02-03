@@ -11,6 +11,28 @@ An OpenClaw skill that monitors flight prices between cities using browser autom
 - **Flexible date ranges** - specific dates, flexible dates, or entire months
 - **Channel-agnostic notifications** - works with Telegram, WhatsApp, Signal, etc.
 
+## Quick Start
+
+```bash
+# 1. Run setup script
+./setup.sh
+
+# 2. Test locally with demo
+node demo.js
+
+# 3. Deploy to OpenClaw
+cp -r . ~/.openclaw/skills/travel-planner
+systemctl --user restart openclaw-gateway
+
+# 4. Verify skill is loaded
+openclaw skills
+```
+
+Then ask OpenClaw:
+- "Check flights from DUS to WAW next Friday"
+- "Monitor flights from New York to Paris"
+- "What flights am I monitoring?"
+
 ## Installation
 
 ### Prerequisites
