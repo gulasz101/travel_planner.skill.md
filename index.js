@@ -51,28 +51,26 @@ async function getSkillConfig() {
   const config = await loadConfig();
 
   if (!config.skills) {
-    config.skills = { entries: {} };
+    config.skills = {};
   }
 
-  if (!config.skills.entries['travel-planner']) {
-    config.skills.entries['travel-planner'] = {
+  if (!config.skills['travel-planner']) {
+    config.skills['travel-planner'] = {
       enabled: true,
-      config: {
-        routes: {},
-        delivery: {
-          channel: null,
-          chatId: null
-        },
-        globalDefaults: {
-          schedule: '0 7 * * *',
-          timezone: 'UTC',
-          priceDropThreshold: 15
-        }
+      routes: {},
+      delivery: {
+        channel: null,
+        chatId: null
+      },
+      globalDefaults: {
+        schedule: '0 7 * * *',
+        timezone: 'UTC',
+        priceDropThreshold: 15
       }
     };
   }
 
-  return config.skills.entries['travel-planner'].config;
+  return config.skills['travel-planner'];
 }
 
 /**
@@ -82,22 +80,20 @@ async function updateSkillConfig(updates) {
   const config = await loadConfig();
 
   if (!config.skills) {
-    config.skills = { entries: {} };
+    config.skills = {};
   }
 
-  if (!config.skills.entries['travel-planner']) {
-    config.skills.entries['travel-planner'] = {
+  if (!config.skills['travel-planner']) {
+    config.skills['travel-planner'] = {
       enabled: true,
-      config: {
-        routes: {},
-        delivery: {},
-        globalDefaults: {}
-      }
+      routes: {},
+      delivery: {},
+      globalDefaults: {}
     };
   }
 
   // Merge updates
-  const skillConfig = config.skills.entries['travel-planner'].config;
+  const skillConfig = config.skills['travel-planner'];
   Object.assign(skillConfig, updates);
 
   await saveConfig(config);
