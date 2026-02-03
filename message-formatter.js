@@ -292,10 +292,114 @@ function formatTimeAgo(timestamp) {
   return `${diffDays} days ago`;
 }
 
+/**
+ * Format round-trip price check results
+ */
+function formatRoundTripResult(result, includeMonitoringSuggestion = true) {
+  const { origin, destination, flights, departDate, returnDate, currency } = result;
+  const curr = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : currency;
+
+  if (!flights || flights.length === 0) {
+    return `I couldn't find any round-trip flights from ${origin} to ${destination} ` +
+           `for ${departDate} → ${returnDate}. Try different dates or check one-way options.`;
+  }
+
+  let message = `✈️ Round-trip prices ${origin} → ${destination}\n`;
+  message += `📅 ${departDate} → ${returnDate}\n\n`;
+
+  const topFlights = flights.slice(0, 3);
+  topFlights.forEach((flight, i) => {
+    message += `💰 ${curr}${flight.price} - ${flight.airline}`;
+
+    if (flight.outbound && flight.inbound) {
+      // Combined from separate legs
+      const outStops = flight.outbound.stops === 0 ? 'direct' : `${flight.outbound.stops} stop${flight.outbound.stops > 1 ? 's' : ''}`;
+      const inStops = flight.inbound.stops === 0 ? 'direct' : `${flight.inbound.stops} stop${flight.inbound.stops > 1 ? 's' : ''}`;
+      message += `\n   ↗️ Outbound: ${curr}${flight.outbound.price} (${outStops}${flight.outbound.duration ? ', ' + flight.outbound.duration : ''})`;
+      message += `\n   ↙️ Return:   ${curr}${flight.inbound.price} (${inStops}${flight.inbound.duration ? ', ' + flight.inbound.duration : ''})`;
+    } else {
+      // Google returned a combined price
+      if (flight.stops === 0) {
+        message += " (direct both ways)";
+      } else {
+        message += ` (${flight.stops} stop${flight.stops > 1 ? 's' : ''} total)`;
+      }
+      if (flight.duration) {
+        message += `, ${flight.duration}`;
+      }
+    }
+
+    message += "\n\n";
+  });
+
+  if (includeMonitoringSuggestion) {
+    message += `Would you like me to monitor this route? ` +
+               `Just ask me to "monitor flights from ${origin} to ${destination}".`;
+  }
+
+  return message;
+}
+
+/**
+ * Format best time range suggestions from price history analysis
+ */
+function formatBestTimeRanges(analysis) {
+  if (!analysis || !analysis.weeks || analysis.weeks.length === 0) {
+    return "Not enough price history yet to suggest best travel times. " +
+           "I'll need a few days of monitoring to build up data.";
+  }
+
+  const { origin, destination, currency, weeks } = analysis;
+  const curr = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency;
+
+  let message = `📊 Best times to fly ${origin} → ${destination}\n`;
+  message += `(based on price history)\n\n`;
+
+  const rank = ['🥇', '🥈', '🥉'];
+  weeks.forEach((week, i) => {
+    const label = rank[i] || `${i + 1}.`;
+    message += `${label} ${formatDateRange(week.weekStart, week.weekEnd)}\n`;
+    message += `   💰 Avg: ${curr}${week.avgPrice}  |  Best: ${curr}${week.bestPrice}\n`;
+    if (i < weeks.length - 1) message += "\n";
+  });
+
+  const cheapest = weeks[0];
+  const mostExpensive = weeks[weeks.length - 1];
+  const saving = mostExpensive.avgPrice - cheapest.avgPrice;
+  if (saving > 0 && weeks.length > 1) {
+    const pct = Math.round((saving / mostExpensive.avgPrice) * 100);
+    message += `\n💡 Flying during the cheapest window saves you ${curr}${saving} (${pct}%) compared to the most expensive week shown.`;
+  }
+
+  return message;
+}
+
+/**
+ * Helper: Format a date range as human-readable string
+ */
+function formatDateRange(startStr, endStr) {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const start = new Date(startStr + 'T00:00:00');
+  const end = new Date(endStr + 'T00:00:00');
+
+  const startMonth = months[start.getMonth()];
+  const endMonth = months[end.getMonth()];
+  const startDay = start.getDate();
+  const endDay = end.getDate();
+
+  if (startMonth === endMonth) {
+    return `${startMonth} ${startDay}–${endDay}`;
+  }
+  return `${startMonth} ${startDay} – ${endMonth} ${endDay}`;
+}
+
 module.exports = {
   formatPriceAlert,
   formatSetupConfirmation,
   formatPriceCheckResult,
+  formatRoundTripResult,
+  formatBestTimeRanges,
   formatRouteList,
   formatStatusUpdate,
   formatRouteDisabled,

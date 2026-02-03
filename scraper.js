@@ -123,17 +123,20 @@ function formatDate(date) {
 }
 
 /**
- * Build Google Flights URL
+ * Build Google Flights URL (one-way or round-trip)
  */
-function buildGoogleFlightsUrl(origin, destination, date) {
+function buildGoogleFlightsUrl(origin, destination, date, returnDate) {
   const baseUrl = 'https://www.google.com/travel/flights';
 
   // Normalize airport codes
   const fromCode = origin.toUpperCase().replace(/[^A-Z]/g, '').substring(0, 3);
   const toCode = destination.toUpperCase().replace(/[^A-Z]/g, '').substring(0, 3);
 
-  if (date) {
-    // Specific date search
+  if (date && returnDate) {
+    // Round-trip search
+    return `${baseUrl}?q=Flights%20from%20${fromCode}%20to%20${toCode}%20on%20${date}%20returning%20${returnDate}`;
+  } else if (date) {
+    // One-way specific date search
     return `${baseUrl}?q=Flights%20from%20${fromCode}%20to%20${toCode}%20on%20${date}`;
   } else {
     // Flexible date search
@@ -144,8 +147,13 @@ function buildGoogleFlightsUrl(origin, destination, date) {
 /**
  * Scrape flight prices from Google Flights
  * This function expects to be called with OpenClaw's browser tool available in context
+ * If returnDateInput is provided, performs a round-trip search
  */
-async function scrapeFlightPrices(browserContext, origin, destination, dateInput = null) {
+async function scrapeFlightPrices(browserContext, origin, destination, dateInput = null, returnDateInput = null) {
+  if (returnDateInput) {
+    return scrapeRoundTrip(browserContext, origin, destination, dateInput, returnDateInput);
+  }
+
   const parsedDate = parseDate(dateInput);
 
   let allFlights = [];
@@ -195,6 +203,136 @@ async function scrapeFlightPrices(browserContext, origin, destination, dateInput
 }
 
 /**
+ * Scrape round-trip flight prices
+ * Scrapes outbound and return legs separately, then combines into round-trip options
+ */
+async function scrapeRoundTrip(browserContext, origin, destination, departInput, returnInput) {
+  const parsedDepart = parseDate(departInput);
+  const parsedReturn = parseDate(returnInput);
+
+  // Resolve to single dates for round-trip (use first date if range)
+  const departDate = parsedDepart.dates && parsedDepart.dates.length > 0
+    ? parsedDepart.dates[0]
+    : null;
+  const returnDate = parsedReturn.dates && parsedReturn.dates.length > 0
+    ? parsedReturn.dates[0]
+    : null;
+
+  // Try combined round-trip URL first (Google Flights handles it natively)
+  const roundTripUrl = buildGoogleFlightsUrl(origin, destination, departDate, returnDate);
+
+  try {
+    await browserContext.navigate(roundTripUrl);
+    await browserContext.wait(5000);
+
+    const flights = await browserContext.evaluate(`
+      (function() {
+        const results = [];
+        const flightCards = document.querySelectorAll('[role="listitem"]');
+
+        flightCards.forEach(card => {
+          try {
+            const priceText = card.textContent.match(/[$€£¥]\\s*([\\d,]+)/);
+            if (!priceText) return;
+
+            const price = parseInt(priceText[1].replace(/,/g, ''), 10);
+            const currency = priceText[0][0] === '$' ? 'USD' : priceText[0][0] === '€' ? 'EUR' : 'USD';
+
+            const airlineElements = card.querySelectorAll('[aria-label*="Airline"]');
+            const airline = airlineElements.length > 0 ? airlineElements[0].textContent.trim() : 'Unknown';
+
+            let stops = 0;
+            if (card.textContent.includes('Nonstop') || card.textContent.includes('Direct')) {
+              stops = 0;
+            } else if (card.textContent.includes('1 stop')) {
+              stops = 1;
+            } else if (card.textContent.includes('2 stop')) {
+              stops = 2;
+            }
+
+            const durationMatch = card.textContent.match(/(\\d+)\\s*h\\s*(\\d+)?\\s*m/);
+            const duration = durationMatch ? durationMatch[0] : null;
+
+            results.push({ price, currency, airline, stops, duration });
+          } catch (e) {}
+        });
+
+        return results;
+      })()
+    `);
+
+    if (flights && flights.length > 0) {
+      // Google returned combined round-trip prices
+      const sorted = flights.sort((a, b) => a.price - b.price);
+      return {
+        success: true,
+        roundTrip: true,
+        flights: sorted,
+        bestPrice: sorted[0].price,
+        departDate,
+        returnDate,
+        currency: sorted[0].currency || 'USD',
+        origin,
+        destination
+      };
+    }
+  } catch (error) {
+    console.error('Error scraping round-trip (combined):', error);
+  }
+
+  // Fallback: scrape each leg separately and combine
+  const [outbound, inbound] = await Promise.all([
+    scrapeSingleDate(browserContext, origin, destination, departDate),
+    scrapeSingleDate(browserContext, destination, origin, returnDate)
+  ]);
+
+  if (outbound.length === 0 || inbound.length === 0) {
+    return {
+      success: false,
+      roundTrip: true,
+      flights: [],
+      bestPrice: null,
+      departDate,
+      returnDate,
+      currency: 'USD'
+    };
+  }
+
+  // Combine top outbound with top inbound options (top 3 x top 3 = up to 9 combos)
+  const combos = [];
+  const topOut = outbound.slice(0, 3);
+  const topIn = inbound.slice(0, 3);
+
+  for (const out of topOut) {
+    for (const inFlight of topIn) {
+      combos.push({
+        price: out.price + inFlight.price,
+        currency: out.currency || 'USD',
+        outbound: out,
+        inbound: inFlight,
+        airline: out.airline === inFlight.airline ? out.airline : `${out.airline} / ${inFlight.airline}`,
+        stops: out.stops + inFlight.stops,
+        duration: out.duration && inFlight.duration ? `${out.duration} + ${inFlight.duration}` : null
+      });
+    }
+  }
+
+  combos.sort((a, b) => a.price - b.price);
+
+  return {
+    success: true,
+    roundTrip: true,
+    flights: combos,
+    bestPrice: combos[0].price,
+    departDate,
+    returnDate,
+    currency: combos[0].currency,
+    origin,
+    destination
+  };
+}
+
+/**
  * Sample dates from a large array
  */
 function sampleDates(dates, maxSamples) {
@@ -221,7 +359,7 @@ async function scrapeSingleDate(browserContext, origin, destination, date) {
 
   try {
     // Navigate to Google Flights
-    await browser.navigate(url);
+    await browserContext.navigate(url);
 
     // Wait for results to load
     await browserContext.wait(5000); // Wait 5 seconds for page to load

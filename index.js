@@ -227,12 +227,13 @@ async function checkFlightPrice(params, context) {
   }
 
   try {
-    // Scrape flight prices
+    // Scrape flight prices (pass return_date for round-trip if provided)
     const result = await scraper.scrapeFlightPrices(
       context.browser,
       originValidation.code,
       destValidation.code,
-      date
+      date,
+      return_date || null
     );
 
     if (!result.success || result.flights.length === 0) {
@@ -244,12 +245,16 @@ async function checkFlightPrice(params, context) {
     const skillConfig = await getSkillConfig();
     const isMonitored = skillConfig.routes[routeId]?.monitoring?.enabled;
 
-    // Format response
+    // Format response: round-trip or one-way
+    if (result.roundTrip) {
+      return formatter.formatRoundTripResult(result, !isMonitored);
+    }
+
     return formatter.formatPriceCheckResult(
       result.flights,
       originValidation.code,
       destValidation.code,
-      !isMonitored // Only suggest monitoring if not already set up
+      !isMonitored
     );
   } catch (error) {
     console.error('Error checking flight prices:', error);
@@ -459,6 +464,27 @@ async function getMonitoringStatus() {
 }
 
 /**
+ * Tool: get_best_travel_times
+ */
+async function getBestTravelTimes(params) {
+  const { route_id } = params;
+
+  try {
+    const analysis = await priceTracker.analyzeBestTimeRanges(route_id);
+
+    if (!analysis) {
+      return `No price history available for route ${route_id}. ` +
+             "I need at least a few days of monitoring data to suggest the best travel times.";
+    }
+
+    return formatter.formatBestTimeRanges(analysis);
+  } catch (error) {
+    console.error('Error analyzing best travel times:', error);
+    return formatter.formatError('SERVICE_UNAVAILABLE');
+  }
+}
+
+/**
  * User-invocable handler: Parse command-line arguments
  */
 function parseUserCommand(args) {
@@ -466,15 +492,21 @@ function parseUserCommand(args) {
     return { command: 'list' };
   }
 
-  // Parse "DUS to WAW next Friday"
-  const toMatch = args.match(/(.+?)\s+to\s+(.+?)(?:\s+(.+))?$/i);
+  // Parse "DUS to WAW next Friday returning March 20"
+  // First try to split on "returning" / "return" to extract return date
+  const returnSplit = args.split(/\s+(?:returning|return)\s+/i);
+  const mainPart = returnSplit[0];
+  const returnDate = returnSplit.length > 1 ? returnSplit[1].trim() : null;
+
+  const toMatch = mainPart.match(/(.+?)\s+to\s+(.+?)(?:\s+(.+))?$/i);
 
   if (toMatch) {
     return {
       command: 'check',
       origin: toMatch[1].trim(),
       destination: toMatch[2].trim(),
-      date: toMatch[3] ? toMatch[3].trim() : null
+      date: toMatch[3] ? toMatch[3].trim() : null,
+      return_date: returnDate
     };
   }
 
@@ -495,18 +527,20 @@ async function handleUserInvocation(args, context) {
     return await checkFlightPrice({
       origin: parsed.origin,
       destination: parsed.destination,
-      date: parsed.date
+      date: parsed.date,
+      return_date: parsed.return_date || null
     }, context);
   }
 
   // Help/interactive prompt
   return "I'll help you check flight prices!\n\n" +
-         "Usage: /travel-planner <origin> to <destination> [date]\n\n" +
+         "Usage: /travel-planner <origin> to <destination> [date] [returning <date>]\n\n" +
          "Examples:\n" +
          "• /travel-planner DUS to WAW next Friday\n" +
-         "• /travel-planner NYC to Paris\n" +
+         "• /travel-planner NYC to Paris March 10 returning March 17\n" +
          "• /travel-planner list (show monitored routes)\n\n" +
-         'To set up monitoring, just ask me: "Monitor flights from [origin] to [destination]"';
+         'To set up monitoring, ask: "Monitor flights from [origin] to [destination]"\n' +
+         'To find cheapest weeks, ask: "When is the cheapest time to fly DUS to WAW?"';
 }
 
 // Export tools for OpenClaw
@@ -553,7 +587,7 @@ module.exports = {
     },
     {
       name: 'check_flight_price',
-      description: 'Check current flight prices for a route (one-time query)',
+      description: 'Check current flight prices for a route. Supports one-way and round-trip searches (provide return_date for round-trip).',
       parameters: {
         type: 'object',
         properties: {
@@ -673,6 +707,21 @@ module.exports = {
         properties: {}
       },
       handler: getMonitoringStatus
+    },
+    {
+      name: 'get_best_travel_times',
+      description: 'Analyze price history to suggest the cheapest weeks to travel for a monitored route',
+      parameters: {
+        type: 'object',
+        properties: {
+          route_id: {
+            type: 'string',
+            description: 'Route identifier (e.g., "DUS-WAW")'
+          }
+        },
+        required: ['route_id']
+      },
+      handler: getBestTravelTimes
     }
   ]
 };

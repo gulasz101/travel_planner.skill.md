@@ -255,6 +255,130 @@ async function deletePriceHistory(routeId) {
   }
 }
 
+/**
+ * Analyze price history to find the cheapest travel date windows.
+ * Groups individual flight prices by the week they fall in and returns
+ * weeks ranked by average best price.
+ */
+async function analyzeBestTimeRanges(routeId) {
+  const history = await loadPriceHistory(routeId);
+
+  if (!history.history || history.history.length === 0) {
+    return null;
+  }
+
+  // Collect all individual flight prices with their travel dates across all checks
+  const pricesByDate = {};
+
+  for (const entry of history.history) {
+    if (!entry.prices || entry.prices.length === 0) continue;
+
+    for (const flight of entry.prices) {
+      if (!flight.travelDate || flight.price == null) continue;
+
+      if (!pricesByDate[flight.travelDate]) {
+        pricesByDate[flight.travelDate] = [];
+      }
+      pricesByDate[flight.travelDate].push(flight.price);
+    }
+  }
+
+  if (Object.keys(pricesByDate).length === 0) {
+    // No per-travel-date data; fall back to bestPrice per check grouped by check week
+    return analyzeBestTimeRangesFromChecks(history.history, history.origin, history.destination);
+  }
+
+  // For each travel date, take the lowest price ever seen
+  const bestPerDate = {};
+  for (const [date, prices] of Object.entries(pricesByDate)) {
+    bestPerDate[date] = Math.min(...prices);
+  }
+
+  // Group by ISO week (Mon-Sun)
+  const weeks = {};
+  for (const [dateStr, price] of Object.entries(bestPerDate)) {
+    const weekKey = getWeekKey(new Date(dateStr + 'T00:00:00'));
+    if (!weeks[weekKey]) {
+      weeks[weekKey] = { prices: [], startDate: dateStr, endDate: dateStr };
+    }
+    weeks[weekKey].prices.push(price);
+    if (dateStr < weeks[weekKey].startDate) weeks[weekKey].startDate = dateStr;
+    if (dateStr > weeks[weekKey].endDate) weeks[weekKey].endDate = dateStr;
+  }
+
+  // Build ranked list
+  const ranked = Object.entries(weeks).map(([weekKey, data]) => ({
+    weekStart: data.startDate,
+    weekEnd: data.endDate,
+    avgPrice: Math.round(data.prices.reduce((a, b) => a + b, 0) / data.prices.length),
+    bestPrice: Math.min(...data.prices),
+    datesChecked: data.prices.length
+  }));
+
+  ranked.sort((a, b) => a.avgPrice - b.avgPrice);
+
+  const currency = history.history[history.history.length - 1]?.currency || 'USD';
+
+  return {
+    routeId,
+    origin: history.origin,
+    destination: history.destination,
+    currency,
+    weeks: ranked.slice(0, 5)
+  };
+}
+
+/**
+ * Fallback: group bestPrice entries by the week of bestTravelDate (or checkDate)
+ * when no per-travel-date flight data is available
+ */
+function analyzeBestTimeRangesFromChecks(historyEntries, origin, destination) {
+  const weeks = {};
+
+  for (const entry of historyEntries) {
+    if (entry.bestPrice == null) continue;
+    const checkDate = entry.bestTravelDate || entry.checkDate.split('T')[0];
+    const weekKey = getWeekKey(new Date(checkDate + 'T00:00:00'));
+
+    if (!weeks[weekKey]) {
+      weeks[weekKey] = { prices: [], startDate: checkDate, endDate: checkDate };
+    }
+    weeks[weekKey].prices.push(entry.bestPrice);
+    if (checkDate < weeks[weekKey].startDate) weeks[weekKey].startDate = checkDate;
+    if (checkDate > weeks[weekKey].endDate) weeks[weekKey].endDate = checkDate;
+  }
+
+  const ranked = Object.entries(weeks).map(([weekKey, data]) => ({
+    weekStart: data.startDate,
+    weekEnd: data.endDate,
+    avgPrice: Math.round(data.prices.reduce((a, b) => a + b, 0) / data.prices.length),
+    bestPrice: Math.min(...data.prices),
+    datesChecked: data.prices.length
+  }));
+
+  ranked.sort((a, b) => a.avgPrice - b.avgPrice);
+
+  return {
+    routeId: null,
+    origin: origin || '',
+    destination: destination || '',
+    currency: 'USD',
+    weeks: ranked.slice(0, 5)
+  };
+}
+
+/**
+ * Get a stable week key (ISO year + week number) for grouping
+ */
+function getWeekKey(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+
 module.exports = {
   loadPriceHistory,
   savePriceHistory,
@@ -264,5 +388,6 @@ module.exports = {
   getPriceHistory,
   deletePriceHistory,
   getStorageDir,
-  getPriceHistoryPath
+  getPriceHistoryPath,
+  analyzeBestTimeRanges
 };
