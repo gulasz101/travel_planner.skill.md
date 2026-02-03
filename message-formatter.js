@@ -250,7 +250,7 @@ function parseScheduleToTime(cronSchedule) {
   const parts = cronSchedule.split(' ');
   if (parts.length < 2) return "7:00 AM";
 
-  const minute = parts[0];
+  const minute = parts[0].padStart(2, '0');
   const hour = parseInt(parts[1], 10);
 
   if (hour === 0) return `12:${minute} AM`;
