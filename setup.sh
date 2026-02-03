@@ -33,16 +33,24 @@ else
     echo "✓ OpenClaw detected: $OPENCLAW_VERSION"
 fi
 
-# Check if browser tool is available
+# Ensure browser is running with the openclaw profile
 echo ""
-echo "🌐 Checking browser tool availability..."
+echo "🌐 Checking browser tool..."
 if command -v openclaw &> /dev/null; then
-    if openclaw browser status &> /dev/null; then
-        echo "✓ Browser tool is available"
+    if openclaw browser --browser-profile openclaw status &> /dev/null; then
+        echo "✓ Browser is running (profile: openclaw)"
     else
-        echo "⚠️  Browser tool not running"
-        echo "   Start it with: openclaw browser start"
+        echo "   Starting browser with openclaw profile..."
+        openclaw browser --browser-profile openclaw start
+        # Verify it came up
+        if openclaw browser --browser-profile openclaw status &> /dev/null; then
+            echo "✓ Browser started (profile: openclaw)"
+        else
+            echo "⚠️  Browser start failed — check OpenClaw logs"
+        fi
     fi
+else
+    echo "⚠️  OpenClaw CLI not found — cannot start browser"
 fi
 
 echo ""

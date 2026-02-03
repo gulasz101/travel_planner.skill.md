@@ -79,6 +79,7 @@ Direct slash command for one-time price checks:
 ```
 /travel-planner DUS to WAW next Friday
 /travel-planner NYC to Paris
+/travel-planner DUS to WAW March 10 returning March 17
 /travel-planner San Francisco to Tokyo in March
 /travel-planner list
 ```
@@ -96,10 +97,17 @@ Talk to OpenClaw naturally, and it will invoke the appropriate tools:
 "Also monitor flights to Madrid"
 ```
 
-**Check prices:**
+**Check prices (one-way or round-trip):**
 ```
 "Check flight prices from NYC to London"
 "What are current prices from DUS to WAW?"
+"Check round-trip flights DUS to WAW March 10 returning March 17"
+```
+
+**Find the cheapest time to travel:**
+```
+"When is the cheapest time to fly DUS to WAW?"
+"What are the best travel dates for NYC to Paris?"
 ```
 
 **Manage monitoring:**
@@ -191,32 +199,33 @@ Configuration is stored in `~/.openclaw/openclaw.json`:
 ```json
 {
   "skills": {
-    "entries": {
-      "travel-planner": {
-        "enabled": true,
-        "config": {
-          "routes": {
-            "NYC-PAR": {
-              "origin": "NYC",
-              "destination": "PAR",
-              "dateRange": "flexible",
-              "monitoring": {
-                "enabled": true,
-                "cronJobId": "travel-planner-NYC-PAR",
-                "schedule": "0 7 * * *",
-                "timezone": "America/New_York"
-              },
-              "preferences": {
-                "priceDropThreshold": 15
-              }
-            }
-          },
-          "globalDefaults": {
+    "travel-planner": {
+      "enabled": true,
+      "routes": {
+        "NYC-PAR": {
+          "id": "NYC-PAR",
+          "origin": "NYC",
+          "destination": "PAR",
+          "dateRange": "flexible",
+          "monitoring": {
+            "enabled": true,
+            "cronJobId": "travel-planner-NYC-PAR",
             "schedule": "0 7 * * *",
-            "timezone": "UTC",
+            "timezone": "America/New_York"
+          },
+          "preferences": {
             "priceDropThreshold": 15
           }
         }
+      },
+      "delivery": {
+        "channel": "telegram",
+        "chatId": "123456789"
+      },
+      "globalDefaults": {
+        "schedule": "0 7 * * *",
+        "timezone": "UTC",
+        "priceDropThreshold": 15
       }
     }
   }
@@ -281,6 +290,11 @@ Statistics tracked:
 - Verify your messaging channel is configured
 - Check logs: `journalctl -u openclaw -f`
 
+### Browser not available
+- Check status: `openclaw browser --browser-profile openclaw status`
+- Start it: `openclaw browser --browser-profile openclaw start`
+- Or just run `./setup.sh` — it handles this automatically
+
 ## Development
 
 ### Running Locally
@@ -314,17 +328,19 @@ openclaw reload
 
 ```
 travel-planner/
-├── SKILL.md              # Skill definition for OpenClaw
-├── index.js              # Main tool definitions and handlers
-├── scraper.js            # Google Flights browser automation
-├── price-tracker.js      # Price history and analysis
-├── message-formatter.js  # User-friendly message formatting
-├── storage/              # Price history data (per route)
-│   ├── price-history-NYC-PAR.json
-│   ├── price-history-DUS-WAW.json
+├── SKILL.md                   # Skill definition for OpenClaw
+├── index.js                   # Tool definitions and handlers (9 tools)
+├── scraper.js                 # Google Flights scraping + round-trip
+├── price-tracker.js           # Price history, deal detection, best-time analysis
+├── message-formatter.js       # User-friendly message formatting
+├── setup.sh                   # Bootstrap script (config, storage, browser)
+├── demo.js                    # Local smoke-test with mock browser
+├── package.json               # Project metadata
+├── README.md                  # This file
+├── IMPLEMENTATION_SUMMARY.md  # Technical overview and TODO list
+├── storage/                   # Price history data (per route, gitignored)
 │   └── .gitkeep
-├── package.json          # Project metadata
-└── README.md            # This file
+└── .gitignore
 ```
 
 ## Security & Privacy
@@ -376,4 +392,4 @@ MIT License - see LICENSE file for details
 
 Current version: **0.1.0**
 
-See TESTING.md for test results and validation.
+See IMPLEMENTATION_SUMMARY.md for technical details and current TODO list.
