@@ -221,7 +221,7 @@ async function scrapeSingleDate(browserContext, origin, destination, date) {
 
   try {
     // Navigate to Google Flights
-    await browserContext.navigate(url);
+    await browser.navigate(url);
 
     // Wait for results to load
     await browserContext.wait(5000); // Wait 5 seconds for page to load
