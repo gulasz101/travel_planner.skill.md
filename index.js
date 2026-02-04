@@ -541,6 +541,80 @@ async function getBestTravelTimes(params) {
 }
 
 /**
+ * Recreate cron jobs for all monitored routes on skill startup
+ */
+async function setupCronJobs() {
+  try {
+    const skillConfig = await getSkillConfig();
+    const routes = skillConfig.routes || {};
+
+    if (Object.keys(routes).length === 0) {
+      console.log('No monitored routes found. Skipping cron job setup.');
+      return;
+    }
+
+    console.log(`Setting up cron jobs for ${Object.keys(routes).length} monitored routes...`);
+
+    for (const [routeId, route] of Object.entries(routes)) {
+      if (!route.monitoring?.enabled) {
+        console.log(`Route ${routeId} is disabled. Skipping.`);
+        continue;
+      }
+
+      const cronJobId = `travel-planner-${routeId}`;
+      const schedule = route.monitoring.schedule;
+      const timezone = route.monitoring.timezone || 'UTC';
+
+      // Check if the cron job already exists
+      try {
+        const cronJobs = await exec({ command: `openclaw cron list` });
+        const cronJobExists = cronJobs.output.includes(cronJobId);
+
+        if (cronJobExists) {
+          console.log(`Cron job ${cronJobId} already exists. Skipping.`);
+          continue;
+        }
+      } catch (error) {
+        console.error(`Failed to check existing cron jobs: ${error.message}`);
+      }
+
+      // Recreate the cron job
+      try {
+        const command = `
+          cd ${process.env.OPENCLAW_HOME || '~/.openclaw'}/skills/travel-planner && 
+          node -e "
+            const skill = require('./index.js');
+            (async () => {
+              const tool = skill.tools.find(t => t.name === 'check_flight_price');
+              await tool.handler({
+                origin: '${route.origin}',
+                destination: '${route.destination}',
+                date: '${route.dateRange || 'flexible'}',
+                flexible_dates: true
+              }, {
+                channel: '${skillConfig.delivery?.channel || 'telegram'}',
+                chatId: '${skillConfig.delivery?.chatId || ''}',
+                browser: true
+              });
+            })();
+          "
+        `;
+
+        await exec({
+          command: `openclaw cron add --id "${cronJobId}" --schedule "${schedule}" --timezone "${timezone}" --command '${command.trim()}'`
+        });
+
+        console.log(`Recreated cron job ${cronJobId} for route ${routeId}`);
+      } catch (error) {
+        console.error(`Failed to recreate cron job for route ${routeId}: ${error.message}`);
+      }
+    }
+  } catch (error) {
+    console.error('Failed to setup cron jobs:', error);
+  }
+}
+
+/**
  * User-invocable handler: Parse command-line arguments
  */
 function parseUserCommand(args) {
@@ -598,6 +672,9 @@ async function handleUserInvocation(args, context) {
          'To set up monitoring, ask: "Monitor flights from [origin] to [destination]"\n' +
          'To find cheapest weeks, ask: "When is the cheapest time to fly DUS to WAW?"';
 }
+
+// Call setupCronJobs on skill load
+setupCronJobs().catch(console.error);
 
 // Export tools for OpenClaw
 module.exports = {

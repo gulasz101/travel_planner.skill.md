@@ -343,19 +343,90 @@ The skill supports monitoring multiple routes simultaneously:
 - Each route maintains its own price history
 - Statistics are calculated per route
 
-## Cron Integration (TODO)
+## Cron Job Persistence
 
-**Note:** Cron job creation is planned but not yet implemented. The placeholder is in `index.js` where it says:
+The Travel Planner skill now **automatically recreates cron jobs on startup**. This ensures that flight price monitoring continues seamlessly after OpenClaw restarts or the skill reloads.
 
-```javascript
-// TODO: Create cron job using OpenClaw's cron.add tool
+### How It Works
+
+1. **On Skill Load:** The `setupCronJobs()` function is called automatically when the skill starts.
+2. **Check Existing Jobs:** The function checks if cron jobs for monitored routes already exist.
+3. **Recreate Missing Jobs:** If a cron job is missing (e.g., after a restart), it is recreated using the stored schedule and settings.
+4. **Skip Existing Jobs:** If a cron job already exists, it is left unchanged.
+
+### Implementation Details
+
+- **Function:** `setupCronJobs()` in `index.js`
+- **Trigger:** Called automatically when the skill loads
+- **Scope:** Processes all monitored routes in the skill configuration
+- **Cron Job ID:** Uses the format `travel-planner-{ROUTE_ID}` (e.g., `travel-planner-NYC-PAR`)
+- **Schedule:** Uses the stored cron schedule (e.g., `0 7 * * *` for 7:00 AM daily)
+- **Timezone:** Uses the stored timezone (e.g., `Europe/Berlin`)
+
+### Example Cron Job
+
+When a route is monitored, the skill creates a cron job like this:
+
+```bash
+openclaw cron add --id "travel-planner-NYC-PAR" \
+  --schedule "0 7 * * *" \
+  --timezone "America/New_York" \
+  --command "cd ~/.openclaw/skills/travel-planner && node -e '...'"
 ```
 
-To implement:
-1. Use OpenClaw's `cron` tool to create scheduled jobs
-2. One cron job per route (e.g., `cron-travel-planner-NYC-PAR`)
-3. Configure isolated execution with delivery to user's channel
-4. Store cron job ID in route config for cleanup
+The command checks flight prices for the route and sends notifications to the user's channel if a deal is detected.
+
+### Benefits
+
+- **Seamless Recovery:** Cron jobs are automatically restored after restarts.
+- **No Manual Intervention:** Users do not need to re-enable monitoring after a restart.
+- **Consistency:** All route settings (schedule, timezone, threshold) are preserved.
+
+### Testing Cron Job Persistence
+
+To verify that cron jobs are recreated on startup:
+
+1. **List Existing Cron Jobs:**
+   ```bash
+   openclaw cron list
+   ```
+
+2. **Restart OpenClaw:**
+   ```bash
+   openclaw gateway restart
+   ```
+
+3. **Verify Cron Jobs:**
+   ```bash
+   openclaw cron list
+   ```
+
+   Ensure that all `travel-planner-*` cron jobs are present and match the monitored routes.
+
+### Troubleshooting
+
+If cron jobs are not recreated:
+
+1. **Check Skill Logs:**
+   ```bash
+   journalctl -u openclaw-gateway -n 50 --no-pager | grep -i "travel-planner\|cron"
+   ```
+
+2. **Verify Configuration:**
+   ```bash
+   cat ~/.openclaw/openclaw.json | grep -A 20 "travel-planner"
+   ```
+
+3. **Check for Errors:**
+   ```bash
+   grep -r "Failed to setup cron jobs" ~/.openclaw/logs/
+   ```
+
+4. **Manually Trigger Setup:**
+   ```bash
+   cd ~/.openclaw/skills/travel-planner
+   node -e "require('./index.js').setupCronJobs().catch(console.error);"
+   ```
 
 ## Browser Integration
 
